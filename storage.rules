@@ -1,0 +1,130 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ============================================
+    // FUNÇÕES AUXILIARES DE SEGURANÇA
+    // ============================================
+    
+    // Verifica se o usuário é administrador via custom claims
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+    
+    // Verifica se o arquivo é uma imagem válida
+    function isValidImage() {
+      return request.resource.contentType.matches('image/(jpeg|jpg|png|gif|webp)');
+    }
+    
+    // Verifica se o arquivo é um PDF
+    function isValidPDF() {
+      return request.resource.contentType == 'application/pdf';
+    }
+    
+    // Verifica se o arquivo é um documento válido (PDF ou imagem)
+    function isValidDocument() {
+      return isValidPDF() || isValidImage();
+    }
+    
+    // Verifica tamanho máximo do arquivo
+    function isValidSize(maxSizeMB) {
+      return request.resource.size <= maxSizeMB * 1024 * 1024;
+    }
+    
+    // ============================================
+    // FOTOS DE PERFIL
+    // ============================================
+    
+    match /profile-photos/{userId}/{fileName} {
+      // Usuário pode ler suas próprias fotos
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Admin pode ler todas as fotos
+      allow read: if isAdmin();
+      
+      // Usuário pode fazer upload de suas fotos com validação rigorosa
+      allow write: if request.auth != null && 
+                      request.auth.uid == userId &&
+                      isValidImage() &&
+                      isValidSize(5); // Máximo 5MB
+      
+      // Usuário pode deletar suas próprias fotos
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // ============================================
+    // ARQUIVOS DE TAREFAS
+    // ============================================
+    
+    match /tasks/{processId}/{taskId}/{fileName} {
+      // Usuários autenticados podem ler e escrever
+      allow read, write: if request.auth != null &&
+                            isValidDocument() &&
+                            isValidSize(10); // Máximo 10MB
+    }
+    
+    // ============================================
+    // ARQUIVOS DE PROCESSOS (por usuário)
+    // ============================================
+    
+    match /processes/{userId}/{processId}/{allPaths=**} {
+      // Usuário pode ler seus próprios arquivos
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      // Admin pode ler todos os arquivos
+      allow read: if isAdmin();
+      
+      // Usuário pode fazer upload em seus processos com validação
+      allow write: if request.auth != null && 
+                      request.auth.uid == userId &&
+                      isValidDocument() &&
+                      isValidSize(10); // Máximo 10MB
+      
+      allow delete: if (request.auth != null && request.auth.uid == userId) || isAdmin();
+    }
+    
+    // ============================================
+    // DOCUMENTOS DE PROCESSOS
+    // ============================================
+    
+    match /process-documents/{processId}/{fileName} {
+      // Usuários autenticados podem ler
+      allow read: if request.auth != null;
+      
+      // Usuários autenticados podem fazer upload com validação
+      allow write: if request.auth != null &&
+                      isValidDocument() &&
+                      isValidSize(10); // Máximo 10MB
+      
+      // Apenas admin pode deletar
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // IMAGENS DO BLOG
+    // ============================================
+    
+    match /blog-images/{fileName} {
+      // Leitura pública permitida
+      allow read: if true;
+      
+      // Usuários autenticados podem fazer upload
+      allow write: if request.auth != null &&
+                      isValidImage() &&
+                      isValidSize(5); // Máximo 5MB
+      
+      // Apenas admin pode deletar
+      allow delete: if isAdmin();
+    }
+    
+    // ============================================
+    // BLOQUEIO PADRÃO
+    // ============================================
+    
+    // Bloqueia acesso a qualquer outro caminho não especificado
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
